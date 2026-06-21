@@ -8,7 +8,7 @@ const forge = require('node-forge');
 const multer = require('multer');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8443;
 
 // In-memory clipboard store: array of { type: string, data: string (base64) }
 let sharedClipboard = [];

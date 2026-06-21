@@ -366,6 +366,81 @@
 
     .https-warn.visible { display: block; }
 
+    /* ── Wake lock toggle ──────────────────────── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+    }
+
+    .toggle-row .toggle-label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .toggle-row .toggle-label .label-main {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .toggle-row .toggle-label .label-sub {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 38px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-switch .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-switch .slider::before {
+      content: '';
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 16px;
+      height: 16px;
+      background: var(--text);
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .toggle-switch input:checked + .slider {
+      background: var(--accent);
+    }
+
+    .toggle-switch input:checked + .slider::before {
+      transform: translateX(18px);
+    }
+
+    .toggle-switch input:disabled + .slider {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     /* ── Divider ────────────────────────────────── */
     .divider {
       border: none;
@@ -398,6 +473,18 @@
       Make sure you are accessing the server over <strong>HTTPS</strong> (the server generates a
       self-signed cert automatically). If you see a browser cert warning, click
       <strong>Advanced &rarr; Proceed</strong> to accept it.
+    </div>
+
+    <!-- Wake lock toggle -->
+    <div class="toggle-row" id="wakeLockRow">
+      <div class="toggle-label">
+        <span class="label-main">Prevent Sleep</span>
+        <span class="label-sub">Keep screen awake while this page is open</span>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="wakeLockToggle" />
+        <span class="slider"></span>
+      </label>
     </div>
 
     <!-- Clipboard -->
@@ -478,6 +565,52 @@
     const downloadList  = document.getElementById('downloadList');
 
     if (!window.isSecureContext) httpsWarn.classList.add('visible');
+
+    // ── Wake Lock ─────────────────────────────────────────────────────────────
+    const wakeLockToggle = document.getElementById('wakeLockToggle');
+    const wakeLockRow    = document.getElementById('wakeLockRow');
+    let wakeLockSentinel = null;
+
+    // Hide the toggle row entirely if the API is not supported
+    if (!('wakeLock' in navigator)) {
+      wakeLockRow.style.display = 'none';
+    } else {
+      wakeLockToggle.addEventListener('change', async () => {
+        if (wakeLockToggle.checked) {
+          await acquireWakeLock();
+        } else {
+          await releaseWakeLock();
+        }
+      });
+
+      // Re-acquire the lock when the tab becomes visible again (the browser
+      // automatically releases wake locks when the document becomes hidden)
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible' && wakeLockToggle.checked && !wakeLockSentinel) {
+          await acquireWakeLock();
+        }
+      });
+    }
+
+    async function acquireWakeLock() {
+      try {
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => {
+          wakeLockSentinel = null;
+        });
+      } catch (err) {
+        // If the request fails (e.g. low battery, permission denied), uncheck the toggle
+        wakeLockToggle.checked = false;
+        wakeLockSentinel = null;
+      }
+    }
+
+    async function releaseWakeLock() {
+      if (wakeLockSentinel) {
+        await wakeLockSentinel.release();
+        wakeLockSentinel = null;
+      }
+    }
 
     // ── Pending file list ──────────────────────────────────────────────────────
     let pendingFiles = []; // Array<File>

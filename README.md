@@ -21,8 +21,8 @@ On startup the server prints every URL it is reachable on:
 ```
 ClipShare is running over HTTPS.
 
-  Local:   https://localhost:3000
-  LAN:     https://192.168.1.67:3000
+  Local:   https://localhost:8443
+  LAN:     https://192.168.1.67:8443
 
 Browser setup (one-time per device):
   Open the URL above, click "Advanced" on the cert warning, then "Proceed".
@@ -62,10 +62,10 @@ A preview of the clipboard contents (text or image) is shown after each operatio
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
-| `PORT` | `3000` | TCP port the HTTPS server listens on |
+| `PORT` | `8443` | TCP port the HTTPS server listens on |
 
 ```sh
-PORT=8443 npm start
+PORT=9443 npm start
 ```
 
 ## Architecture
