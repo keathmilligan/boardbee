@@ -95,6 +95,9 @@ app.get('/api/files/:index', (req, res) => {
   res.send(file.buf);
 });
 
+// Serve static files (favicon.svg, etc.)
+app.use(express.static(path.join(__dirname, 'public')));
+
 // ── TLS cert generation ───────────────────────────────────────────────────────
 
 function getLanIPs() {
@@ -121,7 +124,7 @@ function generateCert(lanIPs) {
   cert.validity.notBefore = now;
   cert.validity.notAfter = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const attrs = [{ name: 'commonName', value: 'clipshare' }];
+  const attrs = [{ name: 'commonName', value: 'boardbee' }];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
 
@@ -150,7 +153,7 @@ const { key, cert } = generateCert(lanIPs);
 const server = https.createServer({ key, cert }, app);
 
 server.listen(PORT, () => {
-  console.log('\nClipShare is running over HTTPS.\n');
+  console.log('\nBoardBee is running over HTTPS.\n');
   console.log(`  Local:   https://localhost:${PORT}`);
   for (const ip of lanIPs) {
     console.log(`  LAN:     https://${ip}:${PORT}`);

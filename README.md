@@ -1,8 +1,19 @@
-# ClipShare
+# BoardBee
 
-Share your clipboard across machines on a local network — no native software required on client devices. Works entirely in the browser using the [Clipboard API](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API).
+Share your clipboard across machines on a local network — no native software required on client devices.
 
-Supports **text**, **images**, and any other MIME type the browser exposes from the clipboard.
+![BoardBee UI screenshot](screenshot.png)
+
+## Features
+
+* Send and receive clipboard contents.
+* Support all clipboard MIME types - plain text, rich text, images and more.
+* Easily send and receive files between devices.
+* "Prevent Sleep" option to keep client devices awake (where supported).
+* All data stays on your local home network.
+* No accounts or sign-ups required.
+
+![BoardBee architecture diagram](architecture-diagram.svg)
 
 ## Requirements
 
@@ -19,7 +30,7 @@ npm start
 On startup the server prints every URL it is reachable on:
 
 ```
-ClipShare is running over HTTPS.
+BoardBee is running over HTTPS.
 
   Local:   https://localhost:8443
   LAN:     https://192.168.1.67:8443
@@ -33,7 +44,7 @@ Browser setup (one-time per device):
 
 The browser Clipboard API (`navigator.clipboard.read` / `navigator.clipboard.write`) is restricted to [secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). `localhost` qualifies automatically, but any other hostname or IP requires HTTPS.
 
-ClipShare solves this by generating a **self-signed TLS certificate** at startup (via [`selfsigned`](https://www.npmjs.com/package/selfsigned)). The certificate covers `localhost` and every LAN IP address found on the server machine, so any of the printed URLs will work. No `openssl` or external tools are needed.
+BoardBee solves this by generating a **self-signed TLS certificate** at startup (via [`selfsigned`](https://www.npmjs.com/package/selfsigned)). The certificate covers `localhost` and every LAN IP address found on the server machine, so any of the printed URLs will work. No `openssl` or external tools are needed.
 
 The cert is ephemeral — regenerated each time the server starts. It is never written to disk.
 
@@ -51,7 +62,7 @@ After accepting, the warning does not appear again for that browser/URL combinat
 
 ## Usage
 
-1. Open the ClipShare URL in a browser on each machine you want to share between.
+1. Open the BoardBee URL in a browser on each machine you want to share between.
 2. Grant clipboard permission when the browser prompts.
 3. **Send** — reads your local clipboard and uploads it to the server.
 4. **Receive** — downloads the server clipboard and writes it to your local clipboard.
@@ -68,12 +79,6 @@ A preview of the clipboard contents (text or image) is shown after each operatio
 PORT=9443 npm start
 ```
 
-## Architecture
-
-```
-server.js          Express HTTPS server; holds clipboard in memory
-public/index.html  Single-page frontend; no build step
-```
 
 **API**
 
