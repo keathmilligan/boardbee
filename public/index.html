@@ -477,9 +477,117 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Auth overlay ───────────────────────────── */
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      z-index: 100;
+    }
+
+    .auth-overlay.hidden { display: none; }
+
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .auth-form input {
+      width: 100%;
+      padding: 0.875rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: 0.25em;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .auth-form input:focus { border-color: var(--accent); }
+
+    .auth-form input::placeholder {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 400;
+      letter-spacing: 0.05em;
+    }
+
+    .auth-form button {
+      background: var(--accent);
+      color: #fff;
+      width: 100%;
+    }
+    .auth-form button:hover:not(:disabled) { background: var(--accent-hover); }
+
+    .auth-error {
+      font-size: 0.8rem;
+      color: var(--error);
+      text-align: center;
+      min-height: 1rem;
+    }
   </style>
 </head>
 <body>
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-card">
+      <h1 class="brand-title">
+        <svg class="brand-logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <path d="M30 22C20 8 6 17 10 30c3 9 15 7 20-8Z" fill="#dbeafe"/>
+          <path d="M34 22C44 8 58 17 54 30c-3 9-15 7-20-8Z" fill="#dbeafe"/>
+          <path d="M27 15c-3-6-9-7-13-3M37 15c3-6 9-7 13-3" stroke="#f8fafc" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="14" cy="12" r="2.5" fill="#f8fafc"/>
+          <circle cx="50" cy="12" r="2.5" fill="#f8fafc"/>
+          <ellipse cx="32" cy="36" rx="18" ry="23" fill="#f59e0b"/>
+          <path d="M17 28c8 4 22 4 30 0M14 39c10 5 26 5 36 0M21 51c7 3 15 3 22 0" stroke="#0f1117" stroke-width="5" stroke-linecap="round"/>
+          <circle cx="26" cy="24" r="2.4" fill="#0f1117"/>
+          <circle cx="38" cy="24" r="2.4" fill="#0f1117"/>
+          <rect x="37" y="35" width="22" height="25" rx="5" fill="#6c63ff" stroke="#0f1117" stroke-width="3"/>
+          <rect x="42" y="31" width="12" height="7" rx="3.5" fill="#f8fafc" stroke="#0f1117" stroke-width="2.5"/>
+          <rect x="41" y="41" width="14" height="14" rx="2.5" fill="#f8fafc"/>
+          <path d="M44 46h8M44 51h6" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Board<span class="brand-accent">Bee</span></span>
+      </h1>
+      <p class="subtitle">Enter the passcode shown on the server to connect</p>
+      <form class="auth-form" id="authForm" autocomplete="off">
+        <input
+          type="text"
+          id="passcodeInput"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          maxlength="6"
+          placeholder="6-digit passcode"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button type="submit" id="authSubmit">Connect</button>
+        <div class="auth-error" id="authError"></div>
+      </form>
+    </div>
+  </div>
+
   <div class="card">
     <h1 class="brand-title">
       <svg class="brand-logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
@@ -596,8 +704,69 @@
     const sendFilesBtn  = document.getElementById('sendFilesBtn');
     const recvFilesBtn  = document.getElementById('recvFilesBtn');
     const downloadList  = document.getElementById('downloadList');
+    const authOverlay   = document.getElementById('authOverlay');
+    const authForm      = document.getElementById('authForm');
+    const passcodeInput = document.getElementById('passcodeInput');
+    const authSubmit    = document.getElementById('authSubmit');
+    const authError     = document.getElementById('authError');
 
     if (!window.isSecureContext) httpsWarn.classList.add('visible');
+
+    // ── Authentication ─────────────────────────────────────────────────────────
+    function showAuthOverlay() {
+      authError.textContent = '';
+      authOverlay.classList.remove('hidden');
+      passcodeInput.value = '';
+      passcodeInput.focus();
+    }
+
+    function hideAuthOverlay() {
+      authOverlay.classList.add('hidden');
+    }
+
+    // fetch wrapper that re-prompts for the passcode if the session expires
+    async function authedFetch(url, options) {
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        showAuthOverlay();
+        throw new Error('Authentication required');
+      }
+      return res;
+    }
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = passcodeInput.value.trim();
+      if (!code) { passcodeInput.focus(); return; }
+      authError.textContent = '';
+      authSubmit.disabled = true;
+      try {
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode: code }),
+        });
+        if (res.ok) {
+          hideAuthOverlay();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          authError.textContent = err.error || 'Authentication failed';
+          passcodeInput.select();
+        }
+      } catch (err) {
+        authError.textContent = err.message;
+      } finally {
+        authSubmit.disabled = false;
+      }
+    });
+
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/check');
+        if (res.ok) { hideAuthOverlay(); return; }
+      } catch (_) { /* fall through to prompt */ }
+      showAuthOverlay();
+    })();
 
     // ── Wake Lock ─────────────────────────────────────────────────────────────
     const wakeLockToggle = document.getElementById('wakeLockToggle');
@@ -735,7 +904,7 @@
         for (const f of pendingFiles) form.append('files', f, f.name);
 
         addStatus('info', `Uploading ${pendingFiles.length} file(s)...`);
-        const res = await fetch('/api/files', { method: 'POST', body: form });
+        const res = await authedFetch('/api/files', { method: 'POST', body: form });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           addStatus('err', `Upload failed: ${err.error || res.statusText}`);
@@ -761,7 +930,7 @@
       setAllLoading(true);
 
       try {
-        const res = await fetch('/api/files');
+        const res = await authedFetch('/api/files');
         if (!res.ok) { addStatus('err', `Server error: ${res.statusText}`); return; }
         const { files, lastUpdated } = await res.json();
 
@@ -839,7 +1008,7 @@
 
         addStatus('info', `Reading ${payload.length} clipboard item(s)...`);
 
-        const res = await fetch('/api/clipboard', {
+        const res = await authedFetch('/api/clipboard', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: payload }),
@@ -875,7 +1044,7 @@
       setAllLoading(true);
 
       try {
-        const res = await fetch('/api/clipboard');
+        const res = await authedFetch('/api/clipboard');
         if (!res.ok) { addStatus('err', `Server error: ${res.statusText}`); return; }
 
         const { items, lastUpdated } = await res.json();

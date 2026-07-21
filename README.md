@@ -27,7 +27,8 @@ npm install
 npm start
 ```
 
-On startup the server prints every URL it is reachable on:
+On startup the server prints every URL it is reachable on, along with a
+one-time passcode clients must enter to connect:
 
 ```
 BoardBee is running over HTTPS.
@@ -38,7 +39,14 @@ BoardBee is running over HTTPS.
 Browser setup (one-time per device):
   Open the URL above, click "Advanced" on the cert warning, then "Proceed".
   You only need to do this once per browser per device.
+
+  Passcode:  492017
+  Enter this passcode when prompted in the browser to connect.
 ```
+
+The passcode is regenerated on every start. After entering it once, a browser
+session cookie keeps the device authenticated for 7 days (or until the server
+restarts).
 
 ## Why HTTPS?
 
@@ -63,9 +71,10 @@ After accepting, the warning does not appear again for that browser/URL combinat
 ## Usage
 
 1. Open the BoardBee URL in a browser on each machine you want to share between.
-2. Grant clipboard permission when the browser prompts.
-3. **Send** — reads your local clipboard and uploads it to the server.
-4. **Receive** — downloads the server clipboard and writes it to your local clipboard.
+2. When prompted, enter the 6-digit passcode printed on the server console.
+3. Grant clipboard permission when the browser prompts.
+4. **Send** — reads your local clipboard and uploads it to the server.
+5. **Receive** — downloads the server clipboard and writes it to your local clipboard.
 
 A preview of the clipboard contents (text or image) is shown after each operation.
 
@@ -121,13 +130,16 @@ When `bindAddresses` is set, BoardBee listens **only** on the listed addresses (
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/clipboard` | Returns `{ items, lastUpdated }` |
-| `POST` | `/api/clipboard` | Accepts `{ items: [{type, data}] }` |
+| `POST` | `/api/auth` | Submit `{ passcode }` to obtain a session cookie |
+| `GET`  | `/api/auth/check` | Report whether the current session is authenticated |
+| `POST` | `/api/auth/logout` | Clear the session cookie |
+| `GET`  | `/api/clipboard` | Returns `{ items, lastUpdated }` (requires auth) |
+| `POST` | `/api/clipboard` | Accepts `{ items: [{type, data}] }` (requires auth) |
 
 Each item carries `type` (MIME type string) and `data` (base64-encoded bytes). The server accepts payloads up to **50 MB**.
 
 ## Security notes
 
-- There is no authentication. Anyone who can reach the server URL can read and overwrite the shared clipboard.
+- **Passcode authentication** is required. On startup the server generates a random 6-digit passcode and prints it to the console. Clients must enter it to obtain a session cookie (HTTP-only, `Secure`, `SameSite=Strict`, 7-day lifetime). The passcode is regenerated on every restart.
 - The clipboard contents live only in server process memory and are lost on restart.
 - Use on a trusted local network only.

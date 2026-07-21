@@ -2,6 +2,7 @@
 
 const https = require('https');
 const net = require('net');
+const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -90,6 +91,63 @@ if (config.bindAddresses) {
   console.log(`Bind addresses: ${config.bindAddresses.join(', ')}`);
 }
 
+// ── Authentication ─────────────────────────────────────────────────────────────
+// On startup the server generates an 8-digit numeric passcode and prints it to
+// the console. Clients must submit this passcode to obtain a session cookie,
+// which is then required for all /api/* endpoints.
+function generatePasscode() {
+  const n = crypto.randomBytes(4).readUInt32BE(0) % 1000000;
+  return n.toString().padStart(6, '0');
+}
+
+function generateSessionToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function constantTimeEquals(a, b) {
+  const ab = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
+const passcode = generatePasscode();
+const sessionToken = generateSessionToken();
+const COOKIE_NAME = 'boardbee_session';
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days, in seconds
+
+function isAuthenticated(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  return Boolean(cookies[COOKIE_NAME]) && constantTimeEquals(cookies[COOKIE_NAME], sessionToken);
+}
+
+function setSessionCookie(res) {
+  res.setHeader(
+    'Set-Cookie',
+    `${COOKIE_NAME}=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE}`,
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader(
+    'Set-Cookie',
+    `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`,
+  );
+}
+
 // In-memory clipboard store: array of { type: string, data: string (base64) }
 let sharedClipboard = [];
 let clipboardLastUpdated = null;
@@ -107,6 +165,40 @@ app.use(express.json({ limit: '50mb' }));
 // Serve the frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Authentication API ────────────────────────────────────────────────────────
+
+// POST /api/auth - submit a passcode to obtain a session cookie
+app.post('/api/auth', (req, res) => {
+  const { passcode: submitted } = req.body || {};
+  if (submitted === undefined || submitted === null) {
+    return res.status(400).json({ error: 'passcode required' });
+  }
+  if (!constantTimeEquals(submitted, passcode)) {
+    return res.status(401).json({ error: 'invalid passcode' });
+  }
+  setSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// GET /api/auth/check - report whether the current session is authenticated
+app.get('/api/auth/check', (req, res) => {
+  if (isAuthenticated(req)) return res.json({ authenticated: true });
+  res.status(401).json({ authenticated: false });
+});
+
+// POST /api/auth/logout - clear the session cookie
+app.post('/api/auth/logout', (req, res) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// Require a valid session for all other /api/* endpoints
+app.use('/api', (req, res, next) => {
+  if (req.path === '/auth' || req.path.startsWith('/auth/')) return next();
+  if (isAuthenticated(req)) return next();
+  res.status(401).json({ error: 'authentication required' });
 });
 
 // ── Clipboard API ────────────────────────────────────────────────────────────
@@ -277,7 +369,9 @@ function printBanner() {
   }
   console.log('\nBrowser setup (one-time per device):');
   console.log('  Open the URL above, click "Advanced" on the cert warning, then "Proceed".');
-  console.log('  You only need to do this once per browser per device.\n');
+  console.log('  You only need to do this once per browser per device.');
+  console.log('\n  Passcode:  ' + passcode);
+  console.log('  Enter this passcode when prompted in the browser to connect.\n');
 }
 
 if (listenHosts) {
