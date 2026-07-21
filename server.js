@@ -1,14 +1,94 @@
 'use strict';
 
 const https = require('https');
+const net = require('net');
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const forge = require('node-forge');
 const multer = require('multer');
 
 const app = express();
-const PORT = process.env.PORT || 8443;
+const DEFAULT_PORT = 8443;
+
+// ── Config loading ─────────────────────────────────────────────────────────────
+// Precedence: environment variables > config file > built-in defaults.
+// The config file is searched at, in order:
+//   1. the path given by the CONFIG env var
+//   2. ./boardbee.config.json (current working directory)
+//   3. <server dir>/boardbee.config.json
+// Recognized fields:
+//   port           (number)  TCP port the HTTPS server listens on
+//   bindAddresses  (string[]) specific IP addresses to bind to; omit/empty to
+//                           listen on all interfaces (default behavior)
+const CONFIG_FILENAME = 'boardbee.config.json';
+
+function findConfigPath() {
+  const candidates = [];
+  if (process.env.CONFIG) candidates.push(process.env.CONFIG);
+  candidates.push(path.join(process.cwd(), CONFIG_FILENAME));
+  candidates.push(path.join(__dirname, CONFIG_FILENAME));
+  for (const p of candidates) {
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch (_) { /* ignore, try next */ }
+  }
+  return null;
+}
+
+function loadConfigFile() {
+  const cfgPath = findConfigPath();
+  if (!cfgPath) return { path: null, config: {} };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn(`Config file at ${cfgPath} is not a JSON object; ignoring.`);
+      return { path: cfgPath, config: {} };
+    }
+    return { path: cfgPath, config: parsed };
+  } catch (err) {
+    console.warn(`Failed to read config file at ${cfgPath}: ${err.message}`);
+    return { path: cfgPath, config: {} };
+  }
+}
+
+function normalizeAddresses(arr) {
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const a of arr) {
+    if (typeof a === 'string') {
+      const s = a.trim();
+      if (s) out.push(s);
+    }
+  }
+  return out;
+}
+
+function parseEnvAddresses(raw) {
+  if (!raw) return null;
+  return normalizeAddresses(raw.split(','));
+}
+
+const { path: configPath, config: fileConfig } = loadConfigFile();
+
+const envPort = process.env.PORT !== undefined ? Number(process.env.PORT) : NaN;
+const configPort = Number.isFinite(envPort) && envPort > 0
+  ? envPort
+  : (typeof fileConfig.port === 'number' && fileConfig.port > 0 ? fileConfig.port : DEFAULT_PORT);
+
+const configBind = parseEnvAddresses(process.env.BIND_ADDRESSES)
+  || normalizeAddresses(fileConfig.bindAddresses)
+  || null;
+
+const config = { port: configPort, bindAddresses: configBind, path: configPath };
+
+if (config.path) {
+  console.log(`Using config file: ${config.path}`);
+}
+if (config.bindAddresses) {
+  console.log(`Bind addresses: ${config.bindAddresses.join(', ')}`);
+}
 
 // In-memory clipboard store: array of { type: string, data: string (base64) }
 let sharedClipboard = [];
@@ -113,7 +193,7 @@ function getLanIPs() {
   return result;
 }
 
-function generateCert(lanIPs) {
+function generateCert(lanIPs, extraHosts, extraIPs) {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
 
@@ -128,11 +208,16 @@ function generateCert(lanIPs) {
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
 
-  const altNames = [
-    { type: 2, value: 'localhost' },
-    { type: 7, ip: '127.0.0.1' },
-    ...lanIPs.map(ip => ({ type: 7, ip })),
-  ];
+  const hostSet = new Set(['localhost']);
+  const ipSet = new Set(['127.0.0.1']);
+  for (const h of extraHosts) hostSet.add(h);
+  for (const ip of extraIPs) ipSet.add(ip);
+  for (const ip of lanIPs) ipSet.add(ip);
+
+  const altNames = [];
+  for (const h of hostSet) altNames.push({ type: 2, value: h });
+  for (const ip of ipSet) altNames.push({ type: 7, ip });
+
   cert.setExtensions([
     { name: 'subjectAltName', altNames },
     { name: 'basicConstraints', cA: false },
@@ -146,19 +231,74 @@ function generateCert(lanIPs) {
   };
 }
 
-console.log('Generating TLS certificate...');
+// ── Resolve listen + display addresses ─────────────────────────────────────────
+// When `bindAddresses` is configured, we bind to each listed address exactly.
+// Otherwise we bind to all interfaces (Node default) and display every LAN IP.
 const lanIPs = getLanIPs();
-const { key, cert } = generateCert(lanIPs);
 
-const server = https.createServer({ key, cert }, app);
+let listenHosts;     // array of host strings to pass to server.listen(port, host)
+let displayUrls;     // array of { label, url } to print at startup
+let certHosts;       // hostnames to include in the cert subjectAltName
+let certIPs;         // IP addresses to include in the cert subjectAltName
 
-server.listen(PORT, () => {
+if (config.bindAddresses && config.bindAddresses.length > 0) {
+  listenHosts = config.bindAddresses;
+  certHosts = [];
+  certIPs = [];
+  displayUrls = [];
+  for (const addr of listenHosts) {
+    if (net.isIP(addr)) {
+      certIPs.push(addr);
+      displayUrls.push({ label: addr === '127.0.0.1' || addr === '::1' ? 'Local:' : 'Bound:', url: `https://${addr}:${config.port}` });
+    } else {
+      certHosts.push(addr);
+      displayUrls.push({ label: 'Bound:', url: `https://${addr}:${config.port}` });
+    }
+  }
+} else {
+  listenHosts = null; // listen on all interfaces
+  certHosts = [];
+  certIPs = [];
+  displayUrls = [
+    { label: 'Local:', url: `https://localhost:${config.port}` },
+    ...lanIPs.map(ip => ({ label: 'LAN:', url: `https://${ip}:${config.port}` })),
+  ];
+}
+
+console.log('Generating TLS certificate...');
+const { key, cert } = generateCert(lanIPs, certHosts, certIPs);
+
+const tlsOptions = { key, cert };
+
+function printBanner() {
   console.log('\nBoardBee is running over HTTPS.\n');
-  console.log(`  Local:   https://localhost:${PORT}`);
-  for (const ip of lanIPs) {
-    console.log(`  LAN:     https://${ip}:${PORT}`);
+  for (const u of displayUrls) {
+    console.log(`  ${u.label.padEnd(8)} ${u.url}`);
   }
   console.log('\nBrowser setup (one-time per device):');
   console.log('  Open the URL above, click "Advanced" on the cert warning, then "Proceed".');
   console.log('  You only need to do this once per browser per device.\n');
-});
+}
+
+if (listenHosts) {
+  let pending = listenHosts.length;
+  for (const host of listenHosts) {
+    const srv = https.createServer(tlsOptions, app);
+    srv.on('error', (err) => {
+      console.error(`Failed to listen on ${host}:${config.port}: ${err.message}`);
+      process.exit(1);
+    });
+    srv.listen(config.port, host, () => {
+      console.log(`  Listening on https://${host}:${config.port}`);
+      pending -= 1;
+      if (pending === 0) printBanner();
+    });
+  }
+} else {
+  const server = https.createServer(tlsOptions, app);
+  server.on('error', (err) => {
+    console.error(`Failed to listen on port ${config.port}: ${err.message}`);
+    process.exit(1);
+  });
+  server.listen(config.port, printBanner);
+}

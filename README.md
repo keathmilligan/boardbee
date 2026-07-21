@@ -71,13 +71,50 @@ A preview of the clipboard contents (text or image) is shown after each operatio
 
 ## Configuration
 
-| Environment variable | Default | Description |
-|----------------------|---------|-------------|
-| `PORT` | `8443` | TCP port the HTTPS server listens on |
+BoardBee can be configured via environment variables, a JSON config file, or both. **Environment variables take precedence over the config file**, which takes precedence over built-in defaults.
+
+### Options
+
+| Option           | Env var           | Default        | Description                                                                                     |
+|------------------|-------------------|----------------|-------------------------------------------------------------------------------------------------|
+| `port`           | `PORT`            | `8443`         | TCP port the HTTPS server listens on                                                            |
+| `bindAddresses`  | `BIND_ADDRESSES`  | all interfaces | List of IP addresses to bind to. Omit/empty to listen on all interfaces (default behavior).     |
+| *(config path)*  | `CONFIG`          | *(auto)*       | Path to a JSON config file. If unset, `boardbee.config.json` is searched in cwd then server dir. |
+
+`BIND_ADDRESSES` is a comma-separated string, e.g. `BIND_ADDRESSES=127.0.0.1,192.168.1.67`.
+
+### Config file
+
+A JSON file named `boardbee.config.json` (see `boardbee.config.example.json` for a template):
+
+```json
+{
+  "port": 9443,
+  "bindAddresses": ["127.0.0.1", "192.168.1.67"]
+}
+```
+
+The file is searched at, in order:
+1. the path given by the `CONFIG` env var
+2. `./boardbee.config.json` (current working directory)
+3. `boardbee.config.json` next to `server.js`
+
+### Examples
 
 ```sh
+# env vars only
 PORT=9443 npm start
+BIND_ADDRESSES=127.0.0.1 npm start
+
+# config file
+cp boardbee.config.example.json boardbee.config.json
+npm start
+
+# explicit config path
+CONFIG=/etc/boardbee.json npm start
 ```
+
+When `bindAddresses` is set, BoardBee listens **only** on the listed addresses (one listener per address) and the TLS certificate covers exactly those addresses plus `localhost`/`127.0.0.1`. This is useful for restricting the server to a single interface or exposing it on a specific IP.
 
 
 **API**
